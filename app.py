@@ -1,0 +1,98 @@
+import os
+import time
+import requests
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
+INSTANCE_URL = os.environ.get('INSTANCE_URL', 'https://api.us-south.watson-orchestrate.cloud.ibm.com/instances/08cf66d9-405d-4244-8561-496a9a0a6601')
+AGENT_ID     = os.environ.get('AGENT_ID', '82df5e79-be2e-4280-801b-1f0d16e09dd4')
+ENV_ID       = os.environ.get('ENV_ID', 'a5a63b33-cf7a-436e-8cd4-fee4f64b027a')
+IBM_API_KEY  = os.environ.get('IBM_API_KEY', '')
+
+def get_token():
+    r = requests.post(
+        'https://iam.cloud.ibm.com/identity/token',
+        data={
+            'grant_type': 'urn:ibm:params:oauth:grant-type:apikey',
+            'apikey': IBM_API_KEY
+        },
+        headers={'Content-Type': 'application/x-www-form-urlencoded'}
+    )
+    if r.status_code != 200:
+        return None
+    return r.json().get('access_token')
+
+def start_run(token, message):
+    r = requests.post(
+        f'{INSTANCE_URL}/v1/orchestrate/runs?stream=false&multiple_content=true',
+        headers={
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        },
+        json={
+            'message': {'role': 'user', 'content': message},
+            'agent_id': AGENT_ID,
+            'environment_id': ENV_ID
+        }
+    )
+    if r.status_code != 200:
+        return None
+    return r.json().get('run_id')
+
+def poll_for_answer(token, run_id, max_attempts=30, wait_seconds=3):
+    for attempt in range(1, max_attempts + 1):
+        time.sleep(wait_seconds)
+        r = requests.get(
+            f'{INSTANCE_URL}/v1/orchestrate/runs/{run_id}',
+            headers={'Authorization': f'Bearer {token}'}
+        )
+        if r.status_code != 200:
+            return None
+        result = r.json()
+        status = result.get('status', 'unknown')
+        print(f'Attempt {attempt} — status: {status}')
+
+        if status == 'completed':
+            try:
+                return result['result']['data']['message']['content'][0]['text']
+            except (KeyError, IndexError):
+                return None
+
+        if status in ['failed', 'error']:
+            return None
+
+    return None
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({'status': 'ok'})
+
+@app.route('/send', methods=['POST'])
+def send():
+    try:
+        body    = request.get_json(force=True)
+        message = body.get('message', '')
+
+        if not message:
+            return jsonify({'error': 'No message provided'}), 400
+
+        token = get_token()
+        if not token:
+            return jsonify({'error': 'Could not retrieve IBM token'}), 500
+
+        run_id = start_run(token, message)
+        if not run_id:
+            return jsonify({'error': 'Could not start agent run'}), 500
+
+        answer = poll_for_answer(token, run_id)
+        if not answer:
+            return jsonify({'error': 'No answer received from agent'}), 500
+
+        return jsonify({'response': answer})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080)
