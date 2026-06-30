@@ -5,10 +5,10 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-INSTANCE_URL = os.environ.get('INSTANCE_URL', 'https://api.us-south.watson-orchestrate.cloud.ibm.com/instances/08cf66d9-405d-4244-8561-496a9a0a6601')
-AGENT_ID     = os.environ.get('AGENT_ID', '82df5e79-be2e-4280-801b-1f0d16e09dd4')
-ENV_ID       = os.environ.get('ENV_ID', 'a5a63b33-cf7a-436e-8cd4-fee4f64b027a')
-IBM_API_KEY  = os.environ.get('IBM_API_KEY', '')
+INSTANCE_URL = os.environ.get('INSTANCE_URL')
+AGENT_ID     = os.environ.get('AGENT_ID')
+ENV_ID       = os.environ.get('ENV_ID')
+IBM_API_KEY  = os.environ.get('IBM_API_KEY')
 
 def get_token():
     r = requests.post(
@@ -87,12 +87,13 @@ def send():
 
         answer = poll_for_answer(token, run_id)
         if not answer:
-            return jsonify({'error': 'No answer received from agent'}), 500
+            return 'No answer received from agent', 500
 
-        return jsonify({'response': answer})
+        return answer, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
