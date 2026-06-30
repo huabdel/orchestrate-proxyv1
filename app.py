@@ -23,7 +23,7 @@ def get_token():
         return None
     return r.json().get('access_token')
 
-def start_run(token, message):
+def start_run(token, message, agent_id, env_id):
     r = requests.post(
         f'{INSTANCE_URL}/v1/orchestrate/runs?stream=false&multiple_content=true',
         headers={
@@ -32,8 +32,8 @@ def start_run(token, message):
         },
         json={
             'message': {'role': 'user', 'content': message},
-            'agent_id': AGENT_ID,
-            'environment_id': ENV_ID
+            'agent_id': agent_id,
+            'environment_id': env_id
         }
     )
     if r.status_code != 200:
@@ -71,8 +71,14 @@ def health():
 @app.route('/send', methods=['POST'])
 def send():
     try:
-        body    = request.get_json(force=True)
-        message = body.get('message', '')
+        if request.is_json:
+            body = request.get_json(force=True)
+        else:
+            body = request.form.to_dict()
+
+        message  = body.get('message', '')
+        agent_id = body.get('agent_id', AGENT_ID)
+        env_id   = body.get('env_id', ENV_ID)
 
         if not message:
             return jsonify({'error': 'No message provided'}), 400
@@ -81,7 +87,7 @@ def send():
         if not token:
             return jsonify({'error': 'Could not retrieve IBM token'}), 500
 
-        run_id = start_run(token, message)
+        run_id = start_run(token, message, agent_id, env_id)
         if not run_id:
             return jsonify({'error': 'Could not start agent run'}), 500
 
