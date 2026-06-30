@@ -71,10 +71,24 @@ def health():
 @app.route('/send', methods=['POST'])
 def send():
     try:
+        raw_body = request.get_data(as_text=True)
+        print(f'RAW BODY: {raw_body}')
+        print(f'CONTENT-TYPE: {request.content_type}')
+
+        body = {}
         if request.is_json:
-            body = request.get_json(force=True)
-        else:
+            try:
+                body = request.get_json(force=True, silent=True) or {}
+            except Exception:
+                body = {}
+        if not body and request.form:
             body = request.form.to_dict()
+        if not body and raw_body:
+            try:
+                import json as _json
+                body = _json.loads(raw_body)
+            except Exception:
+                body = {'message': raw_body}
 
         message  = body.get('message', '')
         agent_id = body.get('agent_id', AGENT_ID)
