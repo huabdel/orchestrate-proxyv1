@@ -1,5 +1,6 @@
 import os
 import time
+import json
 import requests
 from flask import Flask, request, jsonify
 
@@ -37,6 +38,7 @@ def start_run(token, message, agent_id, env_id):
         }
     )
     if r.status_code != 200:
+        print(f'Start run error: {r.status_code} {r.text}')
         return None
     return r.json().get('run_id')
 
@@ -48,6 +50,7 @@ def poll_for_answer(token, run_id, max_attempts=30, wait_seconds=3):
             headers={'Authorization': f'Bearer {token}'}
         )
         if r.status_code != 200:
+            print(f'Poll error: {r.status_code} {r.text}')
             return None
         result = r.json()
         status = result.get('status', 'unknown')
@@ -56,12 +59,15 @@ def poll_for_answer(token, run_id, max_attempts=30, wait_seconds=3):
         if status == 'completed':
             try:
                 return result['result']['data']['message']['content'][0]['text']
-            except (KeyError, IndexError):
+            except (KeyError, IndexError) as e:
+                print(f'Extraction error: {e}')
                 return None
 
         if status in ['failed', 'error']:
+            print(f'Run failed: {result}')
             return None
 
+    print('Timed out.')
     return None
 
 @app.route('/health', methods=['GET'])
@@ -77,31 +83,31 @@ def send():
 
         body = {}
         if request.is_json:
-            try:
-                body = request.get_json(force=True, silent=True) or {}
-            except Exception:
-                body = {}
+            body = request.get_json(force=True, silent=True) or {}
         if not body and request.form:
             body = request.form.to_dict()
         if not body and raw_body:
             try:
-                import json as _json
-                body = _json.loads(raw_body)
+                body = json.loads(raw_body)
             except Exception:
                 body = {'message': raw_body}
 
         message  = body.get('message', '')
+        history  = body.get('history', '')
         agent_id = body.get('agent_id', AGENT_ID)
         env_id   = body.get('env_id', ENV_ID)
 
-        if not message:
+        # Combine history and current message for context
+        full_message = f"{history}\nUser: {message}" if history else message
+
+        if not full_message:
             return jsonify({'error': 'No message provided'}), 400
 
         token = get_token()
         if not token:
             return jsonify({'error': 'Could not retrieve IBM token'}), 500
 
-        run_id = start_run(token, message, agent_id, env_id)
+        run_id = start_run(token, full_message, agent_id, env_id)
         if not run_id:
             return jsonify({'error': 'Could not start agent run'}), 500
 
@@ -112,6 +118,7 @@ def send():
         return answer, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
     except Exception as e:
+        print(f'Error: {e}')
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
